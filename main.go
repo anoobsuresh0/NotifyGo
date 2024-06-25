@@ -118,7 +118,7 @@ func createMultipartRequest(to, body string, mediaPath string) (*http.Request, e
 	}
 
 	// Twilio API endpoint URL
-	urlStr := "https://api.twilio.com/2010-04-01/Accounts/ACd39d8822751796be730b892865faff0f/Messages.json"
+	urlStr := os.Getenv("TWILIO_ACCOUNT_URL")
 
 	req, err := http.NewRequest("POST", urlStr, bodyBuffer)
 	if err != nil {
