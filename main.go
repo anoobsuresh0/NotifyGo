@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+    "github.com/joho/godotenv"
 
 	"gopkg.in/gomail.v2"
 )
@@ -39,8 +40,10 @@ func sendEmailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Access email credentials from environment variables
+
 	senderEmail := os.Getenv("EMAIL_SENDER")
 	senderPassword := os.Getenv("EMAIL_PASSWORD")
+
 	if senderEmail == "" || senderPassword == "" {
 		http.Error(w, "Missing email credentials in environment variables", http.StatusInternalServerError)
 		return
@@ -177,7 +180,13 @@ func sendWhatsAppHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+	
 	http.HandleFunc("/send-email", sendEmailHandler)
+	
 	http.HandleFunc("/send-whatsapp", sendWhatsAppHandler)
 
 	fmt.Println("Server is running on port 8080")
