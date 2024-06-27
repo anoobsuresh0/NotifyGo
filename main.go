@@ -1,17 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
-    "github.com/joho/godotenv"
 
+	"github.com/joho/godotenv"
+	"github.com/twilio/twilio-go"
+	api "github.com/twilio/twilio-go/rest/api/v2010"
 	"gopkg.in/gomail.v2"
 )
 
@@ -40,7 +38,6 @@ func sendEmailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Access email credentials from environment variables
-
 	senderEmail := os.Getenv("EMAIL_SENDER")
 	senderPassword := os.Getenv("EMAIL_PASSWORD")
 
@@ -70,123 +67,81 @@ func sendEmailHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Email sent successfully")
 }
 
-func createMultipartRequest(to, body string, mediaPath string) (*http.Request, error) {
-	bodyBuffer := &bytes.Buffer{}
-	writer := multipart.NewWriter(bodyBuffer)
-
-	err := writer.WriteField("To", "whatsapp:"+to)
-	if err != nil {
-		return nil, err
-	}
-
-	err = writer.WriteField("From", "whatsapp:+14155238886") // Replace with your Twilio WhatsApp number
-	if err != nil {
-		return nil, err
-	}
-
-	err = writer.WriteField("Body", body)
-	if err != nil {
-		return nil, err
-	}
-
-	if mediaPath != "" {
-		file, err := os.Open(mediaPath)
-		if err != nil {
-			return nil, err
-		}
-		defer file.Close()
-
-		part, err := writer.CreateFormFile("MediaUrl", filepath.Base(file.Name()))
-		if err != nil {
-			return nil, err
-		}
-
-		_, err = io.Copy(part, file)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	err = writer.Close()
-	if err != nil {
-		return nil, err
-	}
-
-	// Access Twilio credentials from environment variables
-	
-	accountSid := os.Getenv("TWILIO_ACCOUNT_SID")
-	authToken := os.Getenv("TWILIO_AUTH_TOKEN")
-	if accountSid == "" || authToken == "" {
-		return nil, fmt.Errorf("Missing Twilio credentials in environment variables")
-	}
-
-	// Twilio API endpoint URL
-	urlStr := os.Getenv("TWILIO_ACCOUNT_URL")
-
-	req, err := http.NewRequest("POST", urlStr, bodyBuffer)
-	if err != nil {
-		return nil, err
-	}
-
-	req.SetBasicAuth(accountSid, authToken)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	return req, nil
-}
-
 func sendWhatsAppHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
+    if r.Method != http.MethodPost {
+        http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+        return
+    }
 
-	var data map[string]string
-	err := json.NewDecoder(r.Body).Decode(&data)
-	if err != nil {
-		http.Error(w, "Error parsing request body", http.StatusBadRequest)
-		return
-	}
+    var data map[string]string
+    err := json.NewDecoder(r.Body).Decode(&data)
+    if err != nil {
+        http.Error(w, "Error parsing request body", http.StatusBadRequest)
+        return
+    }
 
-	to, ok := data["to"]
-	if !ok {
-		http.Error(w, "Missing 'to' parameter in request body", http.StatusBadRequest)
-		return
-	}
+    to, ok := data["to"]
+    if !ok {
+        http.Error(w, "Missing 'to' parameter in request body", http.StatusBadRequest)
+        return
+    }
 
-	body, ok := data["body"]
-	if !ok {
-		http.Error(w, "Missing 'body' parameter in request body", http.StatusBadRequest)
-		return
-	}
+    body, ok := data["body"]
+    if !ok {
+        http.Error(w, "Missing 'body' parameter in request body", http.StatusBadRequest)
+        return
+    }
 
-	mediaPath, ok := data["media"] // Optional media path
+    // Access Twilio credentials from environment variables
+    accountSid := os.Getenv("TWILIO_ACCOUNT_SID")
+    authToken := os.Getenv("TWILIO_AUTH_TOKEN")
+    messagingServiceSid := os.Getenv("TWILIO_MESSAGING_SERVICE_SID")
 
-	req, err := createMultipartRequest(to, body, mediaPath)
-	if err != nil {
-		http.Error(w, "Error creating request: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+    if accountSid == "" || authToken == "" || messagingServiceSid == "" {
+        http.Error(w, "Missing Twilio credentials in environment variables", http.StatusInternalServerError)
+        return
+    }
 
-	// Send the WhatsApp message
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, "Error sending WhatsApp message: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
+    client := twilio.NewRestClientWithParams(twilio.ClientParams{
+        Username: accountSid,
+        Password: authToken,
+    })
 
-	fmt.Fprintf(w, "WhatsApp message sent successfully! Response Status: %s", resp.Status)
+    params := &api.CreateMessageParams{}
+    params.SetBody(body)
+    params.SetMessagingServiceSid(messagingServiceSid)
+    params.SetTo("whatsapp:" + to)
+
+    // Handle optional media URL
+    mediaUrl, mediaOk := data["media_url"]
+    if mediaOk && mediaUrl != "" {
+        params.SetMediaUrl([]string{mediaUrl})
+    }
+
+    resp, err := client.Api.CreateMessage(params)
+    if err != nil {
+        log.Println("Error sending WhatsApp message:", err)
+        http.Error(w, "Failed to send WhatsApp message", http.StatusInternalServerError)
+        return
+    }
+
+    // Log the response from Twilio
+    if resp.Body != nil {
+        log.Printf("Twilio Response: %s", *resp.Body)
+    }
+
+    w.WriteHeader(http.StatusOK)
+    fmt.Fprintf(w, "WhatsApp message sent successfully")
 }
+
 
 func main() {
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
-	
+
 	http.HandleFunc("/send-email", sendEmailHandler)
-	
 	http.HandleFunc("/send-whatsapp", sendWhatsAppHandler)
 
 	fmt.Println("Server is running on port 8080")
