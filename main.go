@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -54,7 +53,6 @@ func downloadFile(URL, fileName string) (string, error) {
 }
 
 func sendEmail(req EmailRequest, body string, mediaUrl string) error {
-	// Access email credentials from environment variables
 	senderEmail := os.Getenv("EMAIL_SENDER")
 	senderPassword := os.Getenv("EMAIL_PASSWORD")
 
@@ -62,14 +60,12 @@ func sendEmail(req EmailRequest, body string, mediaUrl string) error {
 		return fmt.Errorf("missing email credentials in environment variables")
 	}
 
-	// Construct email message
 	m := gomail.NewMessage()
 	m.SetHeader("From", senderEmail)
 	m.SetHeader("To", req.To)
 	m.SetHeader("Subject", req.Subject)
 	m.SetBody("text/plain", body)
 
-	// Attach media if provided
 	if mediaUrl != "" {
 		u, err := url.Parse(mediaUrl)
 		if err != nil {
@@ -81,13 +77,11 @@ func sendEmail(req EmailRequest, body string, mediaUrl string) error {
 			return fmt.Errorf("error downloading media: %v", err)
 		}
 		m.Attach(filePath)
-		defer os.Remove(filePath) // Clean up the downloaded file
+		defer os.Remove(filePath)
 	}
 
-	// Configure email dialer
 	d := gomail.NewDialer("smtp.gmail.com", 587, senderEmail, senderPassword)
 
-	// Send the email
 	if err := d.DialAndSend(m); err != nil {
 		return fmt.Errorf("error sending email: %v", err)
 	}
@@ -96,7 +90,6 @@ func sendEmail(req EmailRequest, body string, mediaUrl string) error {
 }
 
 func sendWhatsApp(req WhatsAppRequest, body string, mediaUrl string) error {
-	// Access Twilio credentials from environment variables
 	accountSid := os.Getenv("TWILIO_ACCOUNT_SID")
 	authToken := os.Getenv("TWILIO_AUTH_TOKEN")
 	messagingServiceSid := os.Getenv("TWILIO_MESSAGING_SERVICE_SID")
@@ -124,7 +117,6 @@ func sendWhatsApp(req WhatsAppRequest, body string, mediaUrl string) error {
 		return fmt.Errorf("error sending WhatsApp message: %v", err)
 	}
 
-	// Log the response from Twilio
 	if resp.Body != nil {
 		log.Printf("Twilio Response: %s", *resp.Body)
 	}
@@ -138,22 +130,31 @@ func sendCombinedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req CombinedRequest
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		http.Error(w, "Error parsing request body", http.StatusBadRequest)
-		return
+	toEmail := os.Getenv("TO_EMAIL")
+	toWhatsApp := os.Getenv("TO_WHATSAPP")
+	emailSubject := os.Getenv("EMAIL_SUBJECT")
+	messageBody := os.Getenv("MESSAGE_BODY")
+	mediaUrl := os.Getenv("MEDIA_URL")
+
+	req := CombinedRequest{
+		Email: EmailRequest{
+			To:      toEmail,
+			Subject: emailSubject,
+		},
+		WhatsApp: WhatsAppRequest{
+			To: toWhatsApp,
+		},
+		Body:     messageBody,
+		MediaUrl: mediaUrl,
 	}
 
-	// Send email
-	err = sendEmail(req.Email, req.Body, req.MediaUrl)
+	err := sendEmail(req.Email, req.Body, req.MediaUrl)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, "Failed to send email", http.StatusInternalServerError)
 		return
 	}
 
-	// Send WhatsApp message
 	err = sendWhatsApp(req.WhatsApp, req.Body, req.MediaUrl)
 	if err != nil {
 		log.Println(err)
@@ -178,3 +179,5 @@ func main() {
 		log.Fatal("ListenAndServe:", err)
 	}
 }
+
+//GOOS=linux go build  
